@@ -4,9 +4,9 @@ use anyhow::Context;
 
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
-use http::Uri;
 use patricia_tree::PatriciaSet;
 use regex::RegexSet;
+use url::Url;
 
 use sqlx::sqlite;
 use tokio::sync::mpsc;
@@ -15,13 +15,13 @@ use crate::prelude::*;
 use crate::scraper;
 
 pub struct Orchestrator {
-    seed_urls: Vec<Uri>,
+    seed_urls: Vec<Url>,
     blacklist_re: Arc<RegexSet>,
     whitelist_re: Arc<RegexSet>,
     limits: RateLimit,
 
-    queue_rx: mpsc::UnboundedReceiver<Uri>,
-    queue_tx: mpsc::UnboundedSender<Uri>,
+    queue_rx: mpsc::UnboundedReceiver<Url>,
+    queue_tx: mpsc::UnboundedSender<Url>,
 
     request_client: reqwest::Client,
 
@@ -43,14 +43,14 @@ struct ScraperContext {
     whitelist_re: Arc<RegexSet>,
     noticed_uris: Arc<Mutex<PatriciaSet>>,
     request_client: reqwest::Client,
-    queue_tx: mpsc::UnboundedSender<Uri>,
+    queue_tx: mpsc::UnboundedSender<Url>,
     outfile: sqlx::sqlite::SqlitePool,
 }
 // unsafe impl Send for ScraperContext {}
 
 impl Orchestrator {
     pub fn new(
-        seed_urls: Vec<Uri>,
+        seed_urls: Vec<Url>,
         blacklist_re: RegexSet,
         whitelist_re: RegexSet,
         limits: RateLimit,
@@ -90,13 +90,14 @@ impl Orchestrator {
             seed_links.append(&mut Self::get_unprocessed_links(&self.outfile).await?);
         }
 
+		let split_point = (self.limits.max_parallel_requests as usize).min(seed_links.len());
         // Schedule seed links
-        for link in &seed_links[..self.limits.max_parallel_requests as usize] {
+        for link in &seed_links[..split_point] {
             info!("Scheduling {}", link);
             self.tasks
                 .push(Self::scrape_link(self.create_context(), link.clone()).boxed());
         }
-        for link in &seed_links[self.limits.max_parallel_requests as usize..] {
+        for link in &seed_links[split_point..] {
 			self.queue_tx.send(link.clone())?;
 		}
         self.noticed_uris
@@ -125,7 +126,7 @@ impl Orchestrator {
         Ok(())
     }
 
-    async fn scrape_link(context: ScraperContext, url: Uri) -> anyhow::Result<()> {
+    async fn scrape_link(context: ScraperContext, url: Url) -> anyhow::Result<()> {
         let scrape_result = scraper::scrap_links(&url, context.request_client).await;
 
         debug!("Visited {}", url);
@@ -179,7 +180,7 @@ impl Orchestrator {
     }
 
     // ---------------------- DB operations
-    async fn add_to_links(urls: Vec<Uri>, db_conn: &sqlite::SqlitePool) -> anyhow::Result<()> {
+    async fn add_to_links(urls: Vec<Url>, db_conn: &sqlite::SqlitePool) -> anyhow::Result<()> {
         let mut tx = db_conn.begin().await?;
         for url in urls {
             // TODO: please make this performant (benchmark!!)
@@ -193,7 +194,7 @@ impl Orchestrator {
     }
 
     async fn add_to_results(
-        url: Uri,
+        url: Url,
         html: String,
         db_conn: &sqlite::SqlitePool,
     ) -> anyhow::Result<()> {
@@ -210,7 +211,7 @@ impl Orchestrator {
     }
 
     async fn add_to_errors(
-        url: Uri,
+        url: Url,
         msg: String,
         db_conn: &sqlite::SqlitePool,
     ) -> anyhow::Result<()> {
@@ -228,7 +229,7 @@ impl Orchestrator {
         Ok(())
     }
 
-    async fn get_unprocessed_links(db_conn: &sqlite::SqlitePool) -> anyhow::Result<Vec<Uri>> {
+    async fn get_unprocessed_links(db_conn: &sqlite::SqlitePool) -> anyhow::Result<Vec<Url>> {
         let results = sqlx::query!(
             "
 			SELECT url FROM links
@@ -243,7 +244,7 @@ impl Orchestrator {
 
         let mut rv = vec![];
         for result in results {
-            let _uri = result.url.parse::<Uri>().context("Invalid Uri in DB")?;
+            let _uri = result.url.parse::<Url>().context("Invalid Url in DB")?;
 			rv.push(_uri);
         }
         Ok(rv)

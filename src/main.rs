@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let src: Vec<_> = args
         .seed_links
         .into_iter()
-        .map(|x| x.parse::<http::Uri>().expect("Invalid seed url"))
+        .map(|x| x.parse::<url::Url>().expect("Invalid seed url"))
         .collect();
 
     let whitelist = RegexSet::new(args.whitelist).expect("invalid whitelist regexes");

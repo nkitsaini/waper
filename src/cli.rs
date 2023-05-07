@@ -32,16 +32,12 @@ pub struct CompletionArgs {
 #[derive(Debug, clap::Args)]
 pub struct ScrapeArgs {
     /// whitelist regexes: only these urls will be scanned other then seeds
-    #[arg(short, long)]
+    #[arg(short, long, default_value = ".*")]
     pub whitelist: Vec<String>,
 
-    // TODO: make blacklist optional to avoid a^ hack
-    // a^ matches nothing, hence default
-    // https://stackoverflow.com/questions/940822/regular-expression-syntax-for-match-nothing
-    //
     /// blacklist regexes: these urls will never be scanned
     /// By default nothing will be blacklisted
-    #[arg(short, long, default_value = "a^")]
+    #[arg(short, long)]
     pub blacklist: Vec<String>,
 
     /// Links to start with

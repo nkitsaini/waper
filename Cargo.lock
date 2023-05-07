@@ -2273,7 +2273,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "futures",
- "http",
  "parking_lot 0.12.1",
  "patricia_tree",
  "radix_trie",
@@ -2285,6 +2284,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trie-rs",
+ "url",
 ]
 
 [[package]]
