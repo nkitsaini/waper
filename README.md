@@ -59,3 +59,6 @@ sqlite3 waper_out.sqlite 'select url from scrape_results' | fzf
 - [ ] Allow continuation of previously stopped scraping.
 - [ ] Explicitly handling redirect.
 - [ ] Allow users to modify part of request (like user-agent).
+
+## Feedback
+If you find any bugs or have any feature suggestions please file [an issue](https://github.com/nkitsaini/waper/issues) on github.
