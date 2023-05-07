@@ -7,7 +7,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use regex::RegexSet;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::SqlitePool;
+use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions};
 use tracing::Level;
 
 use std::fs::{OpenOptions};
@@ -54,7 +55,7 @@ fn touch(path: &Path) -> io::Result<()> {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     if args.verbose {
         log::init_logging(Level::DEBUG);
@@ -72,11 +73,17 @@ async fn main() {
 
     touch(&args.output_file).expect("Failed to touch sqlite file");
 
+    let sqlite_options = SqliteConnectOptions::new()
+        .filename(&args.output_file)
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+
     let outfile = SqlitePoolOptions::new()
         .max_connections(3)
-        .connect(&format!("sqlite://{}", args.output_file.to_str().unwrap()))
+        .connect_with(sqlite_options)
         .await
         .expect("Can't open sqlite file");
+
     sqlx::query(include_str!("../sqls/INIT.sql"))
         .execute(&outfile)
         .await
@@ -85,5 +92,5 @@ async fn main() {
     let mut orchestrator =
         orchestrator::Orchestrator::new(src, blacklist, whitelist, 5.into(), outfile);
 
-    orchestrator.start().await;
+    orchestrator.start().await
 }

@@ -29,19 +29,22 @@ Options:
 
 ## Querying data
 
-Data is stored in sqlite db with schema defined in [./sqls/INIT.sql](./sqls/INIT.sql).
+Data is stored in sqlite db with schema defined in [./sqls/INIT.sql](./sqls/INIT.sql). There are three tables
+1. `results`: Stores the content of all the request for which a response was recieved
+2. `errors`: Stores the error message of all the cases where the request could not be completed
+3. `links`: Stores the urls of both visited or unvisited links
   
 
 Result can be queried using any sqlite client. Example using [sqlite cli](https://www.sqlite.org/cli.html):
 ```bash
-$ sqlite3 waper_out.sqlite 'select url, time, length(html) from scrape_results'
+$ sqlite3 waper_out.sqlite 'select url, time, length(html) from results'
 https://example.com/|2023-05-07 06:47:33|1256
 https://www.iana.org/domains/example|2023-05-07 06:47:39|80
 ```
   
 For beautiful output you can modify sqlite3 settings:
 ```bash
-$ sqlite3 waper_out.sqlite '.headers on' '.mode column' 'select url, time, length(html) from scrape_results'
+$ sqlite3 waper_out.sqlite '.headers on' '.mode column' 'select url, time, length(html) from results'
 url                                   time                 length(html)
 ------------------------------------  -------------------  ------------
 https://example.com/                  2023-05-07 06:47:33  1256
@@ -50,7 +53,7 @@ https://www.iana.org/domains/example  2023-05-07 06:47:39  80
   
 To quickly search through all the urls you can use [fzf](https://github.com/junegunn/fzf):
 ```bash
-sqlite3 waper_out.sqlite 'select url from scrape_results' | fzf
+sqlite3 waper_out.sqlite 'select url from links' | fzf
 ```
 
 ## Planned improvements
