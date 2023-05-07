@@ -36,7 +36,7 @@ pub struct Orchestrator {
     // tasks: futures::stream::FuturesUnordered<BoxFuture<'static, ()>>,
     tasks: futures::stream::FuturesUnordered<BoxFuture<'static, anyhow::Result<()>>>,
 
-	outfile: sqlx::sqlite::SqlitePool,
+    outfile: sqlx::sqlite::SqlitePool,
 }
 
 pub struct RateLimit {
@@ -49,7 +49,7 @@ struct ScraperContext {
     noticed_uris: Arc<Mutex<PatriciaSet>>,
     request_client: reqwest::Client,
     queue_tx: mpsc::UnboundedSender<Uri>,
-	outfile: sqlx::sqlite::SqlitePool,
+    outfile: sqlx::sqlite::SqlitePool,
 }
 // unsafe impl Send for ScraperContext {}
 
@@ -85,7 +85,7 @@ impl Orchestrator {
             visited_uris: self.visited_uris.clone(),
             noticed_uris: self.noticed_uris.clone(),
             request_client: self.request_client.clone(),
-			outfile: self.outfile.clone(),
+            outfile: self.outfile.clone(),
             queue_tx,
         };
     }
@@ -102,10 +102,10 @@ impl Orchestrator {
             .extend(self.seed_urls.iter().map(|x| x.to_string()));
 
         while let Some(task) = self.tasks.next().await {
-			if let Err(e) = task {
-				error!("Error: {:?}", e);
-				// continue even if error as task completion might have freed the `RateLimit` pool
-			}
+            if let Err(e) = task {
+                error!("Error: {:?}", e);
+                // continue even if error as task completion might have freed the `RateLimit` pool
+            }
             while self.tasks.len() < self.limits.max_parallel_requests as usize {
                 // error drop: The error can never be `TryRecvError::Disconnected`
                 // as we always have a reference to queue_tx in `Self`
@@ -128,15 +128,21 @@ impl Orchestrator {
         context.visited_uris.lock().insert(url.to_string());
         debug!("Visited {}", url);
 
-		// add to visited even if fech fails to avoid
-		// continous failure calls
-        let scrape_result = scrape_result.context(format!("Failed to fetch webpage for uri: {}", url))?;
+        // add to visited even if fech fails to avoid
+        // continous failure calls
+        let scrape_result =
+            scrape_result.context(format!("Failed to fetch webpage for uri: {}", url))?;
 
-		let url_string = url.to_string();
-		sqlx::query!("INSERT INTO scrape_results (url, html) VALUES (?, ?)",
-			url_string, scrape_result.html)
-			.execute(&context.outfile).await.context(format!("Failed to insert in sqlite db for uri: {}", url))?;
-		// context.outfile.
+        let url_string = url.to_string();
+        sqlx::query!(
+            "INSERT INTO scrape_results (url, html) VALUES (?, ?)",
+            url_string,
+            scrape_result.html
+        )
+        .execute(&context.outfile)
+        .await
+        .context(format!("Failed to insert in sqlite db for uri: {}", url))?;
+        // context.outfile.
 
         // No async/heavy operation after this,
         // safe to take the lock
@@ -164,7 +170,7 @@ impl Orchestrator {
                 .send(link)
                 .expect("reciever should never be dropped as long as scrapes are running");
         }
-		Ok(())
+        Ok(())
     }
 }
 

@@ -10,8 +10,8 @@ use regex::RegexSet;
 use sqlx::sqlite::SqlitePoolOptions;
 use tracing::Level;
 
-use std::io;
 use std::fs::{File, OpenOptions};
+use std::io;
 use std::io::prelude::*;
 use std::os::unix;
 use std::path::Path;
@@ -77,7 +77,10 @@ async fn main() {
         .connect(&format!("sqlite://{}", args.output_file.to_str().unwrap()))
         .await
         .expect("Can't open sqlite file");
-    sqlx::query(include_str!("../sqls/INIT.sql")).execute(&outfile).await.expect("Failed to initialize sqlite file schema");
+    sqlx::query(include_str!("../sqls/INIT.sql"))
+        .execute(&outfile)
+        .await
+        .expect("Failed to initialize sqlite file schema");
 
     let mut orchestrator =
         orchestrator::Orchestrator::new(src, blacklist, whitelist, 5.into(), outfile);
