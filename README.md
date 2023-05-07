@@ -53,12 +53,15 @@ To quickly search through all the urls you can use [fzf](https://github.com/june
 sqlite3 waper_out.sqlite 'select url from scrape_results' | fzf
 ```
 
-## Planned features
+## Planned improvements
 - [ ] Allow users to specify priority for urls, so some urls can be scraped before others.
 - [ ] Support complex rate-limits
 - [ ] Allow continuation of previously stopped scraping.
 - [ ] Explicitly handling redirect.
 - [ ] Allow users to modify part of request (like user-agent).
+- [ ] Improve storage efficiency by compressing/de-duping the html
+- [ ] Provide more visibility into how many urls are queued, at which rate are they getting processed etc.
 
 ## Feedback
 If you find any bugs or have any feature suggestions please file [an issue](https://github.com/nkitsaini/waper/issues) on github.
+
