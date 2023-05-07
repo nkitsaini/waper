@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-
 use anyhow::Context;
 
-use futures::{future::BoxFuture};
+use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use http::Uri;
 use patricia_tree::PatriciaSet;
@@ -11,7 +10,6 @@ use regex::RegexSet;
 
 use sqlx::sqlite;
 use tokio::sync::mpsc;
-
 
 use crate::prelude::*;
 use crate::scraper;
@@ -85,17 +83,27 @@ impl Orchestrator {
         }
     }
 
-    pub async fn start(&mut self) -> anyhow::Result<()> {
+    pub async fn start(&mut self, include_unprocessed_from_db: bool) -> anyhow::Result<()> {
         debug!("Starting orchestrator");
-        for link in &self.seed_urls {
+        let mut seed_links = self.seed_urls.clone();
+        if include_unprocessed_from_db {
+            seed_links.append(&mut Self::get_unprocessed_links(&self.outfile).await?);
+        }
+
+        // Schedule seed links
+        for link in &seed_links[..self.limits.max_parallel_requests as usize] {
             info!("Scheduling {}", link);
             self.tasks
                 .push(Self::scrape_link(self.create_context(), link.clone()).boxed());
         }
+        for link in &seed_links[self.limits.max_parallel_requests as usize..] {
+			self.queue_tx.send(link.clone())?;
+		}
         self.noticed_uris
             .lock()
-            .extend(self.seed_urls.iter().map(|x| x.to_string()));
-		Self::add_to_links(self.seed_urls.clone(), &self.outfile).await?;
+            .extend(seed_links.iter().map(|x| x.to_string()));
+
+        Self::add_to_links(self.seed_urls.clone(), &self.outfile).await?;
 
         while let Some(task) = self.tasks.next().await {
             if let Err(e) = task {
@@ -114,7 +122,7 @@ impl Orchestrator {
                 }
             }
         }
-		Ok(())
+        Ok(())
     }
 
     async fn scrape_link(context: ScraperContext, url: Uri) -> anyhow::Result<()> {
@@ -122,71 +130,74 @@ impl Orchestrator {
 
         debug!("Visited {}", url);
 
-        let scrape_result =
-            match scrape_result{
-				Ok(r) => {
-					Self::add_to_results(url.clone(), r.html.clone(), &context.outfile).await?;
-					r
-				},
-				Err(e) => {
-					Self::add_to_errors(url.clone(), format!("{e:?}"), &context.outfile).await?;
-					Err(e).context(format!("Failed to fetch webpage for uri: {url}"))?;
-					unreachable!();
-				}
+        let scrape_result = match scrape_result {
+            Ok(r) => {
+                Self::add_to_results(url.clone(), r.html.clone(), &context.outfile).await?;
+                r
+            }
+            Err(e) => {
+                Self::add_to_errors(url.clone(), format!("{e:?}"), &context.outfile).await?;
+                Err(e).context(format!("Failed to fetch webpage for uri: {url}"))?;
+                unreachable!();
+            }
+        };
 
-			};
+        let mut links_to_add = vec![];
+        {
+            // No async/heavy operation after this,
+            // safe to take the lock
+            let mut noticed_uris_lock = context.noticed_uris.lock();
+            for link in scrape_result.links {
+                // TODO: too many to_string operations
+                // benchmark and move to passing strings around instead if required.
+                if context.blacklist_re.is_match(&link.to_string()) {
+                    debug!("Does not match blacklist: {}", link);
+                    continue;
+                }
+                if !context.whitelist_re.is_match(&link.to_string()) {
+                    debug!("Does not match whitelist: {}", link);
+                    continue;
+                }
 
-		let mut links_to_add = vec![];
-		{
-			// No async/heavy operation after this,
-			// safe to take the lock
-			let mut noticed_uris_lock = context.noticed_uris.lock();
-			for link in scrape_result.links {
-				// TODO: too many to_string operations
-				// benchmark and move to passing strings around instead if required.
-				if context.blacklist_re.is_match(&link.to_string()) {
-					debug!("Does not match blacklist: {}", link);
-					continue;
-				}
-				if !context.whitelist_re.is_match(&link.to_string()) {
-					debug!("Does not match whitelist: {}", link);
-					continue;
-				}
+                if noticed_uris_lock.contains(&link.to_string()) {
+                    debug!("Already Noticed: {}", link);
+                    continue;
+                }
+                debug!("Found: {}", link);
 
-				if noticed_uris_lock.contains(&link.to_string()) {
-					debug!("Already Noticed: {}", link);
-					continue;
-				}
-				debug!("Found: {}", link);
-
-				noticed_uris_lock.insert(&link.to_string());
-				links_to_add.push(link.clone());
-				// Self::add_to_links(vec![link.clone()], context.outfile.clone()).await?;
-				context
-					.queue_tx
-					.send(link)
-					.expect("reciever should never be dropped as long as scrapes are running");
-			}
-		}
-		Self::add_to_links(links_to_add, &context.outfile).await?;
+                noticed_uris_lock.insert(&link.to_string());
+                links_to_add.push(link.clone());
+                // Self::add_to_links(vec![link.clone()], context.outfile.clone()).await?;
+                context
+                    .queue_tx
+                    .send(link)
+                    .expect("reciever should never be dropped as long as scrapes are running");
+            }
+        }
+        Self::add_to_links(links_to_add, &context.outfile).await?;
         Ok(())
     }
 
-	async fn add_to_links(urls: Vec<Uri>, db_conn: &sqlite::SqlitePool) -> anyhow::Result<()> {
-		let mut tx = db_conn.begin().await?;
-		for url in urls {
-			// TODO: please make this performant (benchmark!!)
-			// see: https://github.com/launchbadge/sqlx/issues/294
-			let url_string = url.to_string();
-			let query = sqlx::query!("INSERT INTO links (url) VALUES (?)", url_string);
-			query.execute(&mut tx).await?;
-		}
-		tx.commit().await?;
-		Ok(())
-	}
+    // ---------------------- DB operations
+    async fn add_to_links(urls: Vec<Uri>, db_conn: &sqlite::SqlitePool) -> anyhow::Result<()> {
+        let mut tx = db_conn.begin().await?;
+        for url in urls {
+            // TODO: please make this performant (benchmark!!)
+            // see: https://github.com/launchbadge/sqlx/issues/294
+            let url_string = url.to_string();
+            let query = sqlx::query!("INSERT INTO links (url) VALUES (?)", url_string);
+            query.execute(&mut tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
 
-	async fn add_to_results(url: Uri, html: String, db_conn: &sqlite::SqlitePool) -> anyhow::Result<()> {
-		let url_string = url.to_string();
+    async fn add_to_results(
+        url: Uri,
+        html: String,
+        db_conn: &sqlite::SqlitePool,
+    ) -> anyhow::Result<()> {
+        let url_string = url.to_string();
         sqlx::query!(
             "INSERT INTO results (url, content) VALUES (?, ?)",
             url_string,
@@ -195,11 +206,15 @@ impl Orchestrator {
         .execute(db_conn)
         .await
         .context(format!("Failed to insert in sqlite db for uri: {url}"))?;
-		Ok(())
-	}
+        Ok(())
+    }
 
-	async fn add_to_errors(url: Uri, msg: String, db_conn: &sqlite::SqlitePool) -> anyhow::Result<()> {
-		let url_string = url.to_string();
+    async fn add_to_errors(
+        url: Uri,
+        msg: String,
+        db_conn: &sqlite::SqlitePool,
+    ) -> anyhow::Result<()> {
+        let url_string = url.to_string();
         sqlx::query!(
             "INSERT INTO errors (url, msg) VALUES (?, ?)",
             url_string,
@@ -207,10 +222,32 @@ impl Orchestrator {
         )
         .execute(db_conn)
         .await
-        .context(format!("Failed to insert error in sqlite db for uri: {url}"))?;
-		Ok(())
-	}
+        .context(format!(
+            "Failed to insert error in sqlite db for uri: {url}"
+        ))?;
+        Ok(())
+    }
 
+    async fn get_unprocessed_links(db_conn: &sqlite::SqlitePool) -> anyhow::Result<Vec<Uri>> {
+        let results = sqlx::query!(
+            "
+			SELECT url FROM links
+			WHERE
+				url NOT IN (SELECT url FROM results) AND
+				url NOT IN (SELECT url FROM errors)
+			ORDER BY time",
+        )
+        .fetch_all(db_conn)
+        .await
+        .context("Failed to fetch links from sqlite db".to_string())?;
+
+        let mut rv = vec![];
+        for result in results {
+            let _uri = result.url.parse::<Uri>().context("Invalid Uri in DB")?;
+			rv.push(_uri);
+        }
+        Ok(rv)
+    }
 }
 
 impl From<u64> for RateLimit {

@@ -13,18 +13,35 @@ cargo install waper
 
 ## CLI Usage
 ```
-Program to scrape websites and save html to a sqlite file. Example: waper --whitelist "https://example.com/.*" --whitelist "https://www.iana.org/domains/example" -s "https://example.com/"
+A CLI tool to scrape HTML websites
 
 Usage: waper [OPTIONS]
+       waper <COMMAND>
+
+Commands:
+  scrape      This is also default command, so it's optional to include in args
+  completion  Print shell completion script
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
-  -w, --whitelist <WHITELIST>      whitelist regexes: only these urls will be scanned other then seeds
-  -b, --blacklist <BLACKLIST>      blacklist regexes: these urls will never be scanned By default nothing will be blacklisted [default: a^]
-  -s, --seed-links <SEED_LINKS>    Links to start with
-  -o, --output-file <OUTPUT_FILE>  Sqlite output file [default: waper_out.sqlite]
-  -v, --verbose                    Should verbose (debug) output
-  -h, --help                       Print help
-  -V, --version                    Print version
+  -w, --whitelist <WHITELIST>
+          whitelist regexes: only these urls will be scanned other then seeds
+  -b, --blacklist <BLACKLIST>
+          blacklist regexes: these urls will never be scanned By default nothing will be blacklisted [default: a^]
+  -s, --seed-links <SEED_LINKS>
+          Links to start with
+  -o, --output-file <OUTPUT_FILE>
+          Sqlite output file [default: waper_out.sqlite]
+  -m, --max-parallel-requests <MAX_PARALLEL_REQUESTS>
+          Sqlite output file [default: 5]
+  -i, --include-db-links
+          Will also include unprocessed links from `links` table in db if present. Helpful when you want to continue the scraping from a previously unfinished session
+  -v, --verbose
+          Should verbose (debug) output
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 ## Querying data
@@ -57,13 +74,14 @@ sqlite3 waper_out.sqlite 'select url from links' | fzf
 ```
 
 ## Planned improvements
-- [ ] Allow users to specify priority for urls, so some urls can be scraped before others.
+- [ ] Allow users to specify priority for urls, so some urls can be scraped before others
 - [ ] Support complex rate-limits
-- [ ] Allow continuation of previously stopped scraping.
-- [ ] Explicitly handling redirect.
-- [ ] Allow users to modify part of request (like user-agent).
+- [ ] Allow continuation of previously stopped scraping
+  - [ ] Should continue working on IP roaming (auto-detect and continue)
+- [ ] Explicitly handling redirect
+- [ ] Allow users to modify part of request (like user-agent)
 - [ ] Improve storage efficiency by compressing/de-duping the html
-- [ ] Provide more visibility into how many urls are queued, at which rate are they getting processed etc.
+- [ ] Provide more visibility into how many urls are queued, at which rate are they getting processed etc
 
 ## Feedback
 If you find any bugs or have any feature suggestions please file [an issue](https://github.com/nkitsaini/waper/issues) on github.

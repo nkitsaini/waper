@@ -2,61 +2,31 @@ mod log;
 mod orchestrator;
 mod prelude;
 mod scraper;
+mod cli;
 
-use std::path::PathBuf;
-
-use clap::Parser;
 use regex::RegexSet;
-
-use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tracing::Level;
-
-use std::fs::{OpenOptions};
+use clap::{Parser, CommandFactory};
+use cli::{Args, Command};
 use std::io;
-use std::io::prelude::*;
 
-use std::path::Path;
-
-/// Program to scrape websites and save html to a sqlite file.
-/// Example: waper --whitelist "https://example.com/.*" --whitelist "https://www.iana.org/domains/example" -s "https://example.com/"
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// whitelist regexes: only these urls will be scanned other then seeds
-    #[arg(short, long)]
-    whitelist: Vec<String>,
-
-    // a^ matches nothing, hence default
-    // https://stackoverflow.com/questions/940822/regular-expression-syntax-for-match-nothing
-    //
-    /// blacklist regexes: these urls will never be scanned
-    /// By default nothing will be blacklisted
-    #[arg(short, long, default_value = "a^")]
-    blacklist: Vec<String>,
-
-    /// Links to start with
-    #[arg(short, long)]
-    seed_links: Vec<String>,
-
-    /// Sqlite output file
-    #[arg(short, long, default_value = "waper_out.sqlite")]
-    output_file: PathBuf,
-
-    /// Should verbose (debug) output
-    #[arg(short, long, default_value_t = false)]
-    verbose: bool,
-}
-
-fn touch(path: &Path) -> io::Result<()> {
-    match OpenOptions::new().create(true).write(true).open(path) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(e),
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    if let Some(Command::Completion(shell)) = args.command {
+        let mut cmd = Args::command();
+        let name = cmd.get_name().to_string();
+        clap_complete::generate(shell.shell, &mut cmd, name, &mut io::stdout());
+        return Ok(());
+    }
+
+    // If no command is provided or the `scrape` command is provided
+    // we want to scrape
+
+    let args = args.scrape_args;
     if args.verbose {
         log::init_logging(Level::DEBUG);
     } else {
@@ -70,8 +40,6 @@ async fn main() -> anyhow::Result<()> {
 
     let whitelist = RegexSet::new(args.whitelist).expect("invalid whitelist regexes");
     let blacklist = RegexSet::new(args.blacklist).expect("invalid blacklist regexes");
-
-    touch(&args.output_file).expect("Failed to touch sqlite file");
 
     let sqlite_options = SqliteConnectOptions::new()
         .filename(&args.output_file)
@@ -90,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to initialize sqlite file schema");
 
     let mut orchestrator =
-        orchestrator::Orchestrator::new(src, blacklist, whitelist, 5.into(), outfile);
+        orchestrator::Orchestrator::new(src, blacklist, whitelist, args.max_parallel_requests.into(), outfile);
 
-    orchestrator.start().await
+    orchestrator.start(args.include_db_links).await
 }
