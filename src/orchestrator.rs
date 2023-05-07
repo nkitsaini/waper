@@ -62,7 +62,7 @@ impl Orchestrator {
         outfile: sqlx::sqlite::SqlitePool,
     ) -> Self {
         let (queue_tx, queue_rx) = mpsc::unbounded_channel();
-        return Self {
+        Self {
             seed_urls,
             blacklist_re: Arc::new(blacklist_re),
             whitelist_re: Arc::new(whitelist_re),
@@ -74,12 +74,12 @@ impl Orchestrator {
             noticed_uris: Arc::new(Mutex::new(PatriciaSet::new())),
             tasks: futures::stream::FuturesUnordered::new(),
             outfile,
-        };
+        }
     }
 
     fn create_context(&self) -> ScraperContext {
         let queue_tx = self.queue_tx.clone();
-        return ScraperContext {
+        ScraperContext {
             blacklist_re: self.blacklist_re.clone(),
             whitelist_re: self.whitelist_re.clone(),
             visited_uris: self.visited_uris.clone(),
@@ -87,7 +87,7 @@ impl Orchestrator {
             request_client: self.request_client.clone(),
             outfile: self.outfile.clone(),
             queue_tx,
-        };
+        }
     }
 
     pub async fn start(&mut self) {
@@ -131,7 +131,7 @@ impl Orchestrator {
         // add to visited even if fech fails to avoid
         // continous failure calls
         let scrape_result =
-            scrape_result.context(format!("Failed to fetch webpage for uri: {}", url))?;
+            scrape_result.context(format!("Failed to fetch webpage for uri: {url}"))?;
 
         let url_string = url.to_string();
         sqlx::query!(
@@ -141,7 +141,7 @@ impl Orchestrator {
         )
         .execute(&context.outfile)
         .await
-        .context(format!("Failed to insert in sqlite db for uri: {}", url))?;
+        .context(format!("Failed to insert in sqlite db for uri: {url}"))?;
         // context.outfile.
 
         // No async/heavy operation after this,

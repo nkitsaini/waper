@@ -25,5 +25,5 @@ pub async fn scrap_links(url: &Uri, client: reqwest::Client) -> anyhow::Result<S
         })
         .collect::<Vec<_>>();
 
-    return Ok(ScrapingResult { links, html: text });
+    Ok(ScrapingResult { links, html: text })
 }
