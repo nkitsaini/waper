@@ -129,7 +129,7 @@ impl Orchestrator {
 					r
 				},
 				Err(e) => {
-					Self::add_to_errors(url.clone(), format!("{:?}", e), &context.outfile).await?;
+					Self::add_to_errors(url.clone(), format!("{e:?}"), &context.outfile).await?;
 					Err(e).context(format!("Failed to fetch webpage for uri: {url}"))?;
 					unreachable!();
 				}
