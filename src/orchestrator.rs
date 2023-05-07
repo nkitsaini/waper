@@ -1,16 +1,16 @@
 use std::sync::Arc;
-use std::thread::JoinHandle;
+
 
 use anyhow::Context;
-use futures::channel::mpsc::TryRecvError;
-use futures::{future::BoxFuture, Future};
+
+use futures::{future::BoxFuture};
 use futures::{FutureExt, StreamExt};
 use http::Uri;
 use patricia_tree::PatriciaSet;
 use regex::RegexSet;
-use tokio::select;
+
 use tokio::sync::mpsc;
-use tracing_subscriber::field::debug;
+
 
 use crate::prelude::*;
 use crate::scraper;

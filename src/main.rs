@@ -10,10 +10,10 @@ use regex::RegexSet;
 use sqlx::sqlite::SqlitePoolOptions;
 use tracing::Level;
 
-use std::fs::{File, OpenOptions};
+use std::fs::{OpenOptions};
 use std::io;
 use std::io::prelude::*;
-use std::os::unix;
+
 use std::path::Path;
 
 /// Program to scrape websites and save html to a sqlite file.
