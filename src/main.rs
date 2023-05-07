@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use regex::RegexSet;
-use sqlx::SqlitePool;
+
 use sqlx::sqlite::{SqlitePoolOptions, SqliteConnectOptions};
 use tracing::Level;
 
