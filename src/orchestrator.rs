@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 
@@ -64,7 +65,7 @@ impl Orchestrator {
             limits,
             queue_rx,
             queue_tx,
-            request_client: reqwest::Client::new(),
+            request_client: reqwest::ClientBuilder::new().timeout(Duration::from_secs(10)).build().unwrap(),
             noticed_uris: Arc::new(Mutex::new(PatriciaSet::new())),
             tasks: futures::stream::FuturesUnordered::new(),
             outfile,

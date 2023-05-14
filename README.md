@@ -82,6 +82,7 @@ sqlite3 waper_out.sqlite 'select url from links' | fzf
 - [ ] Allow users to modify part of request (like user-agent)
 - [ ] Improve storage efficiency by compressing/de-duping the html
 - [ ] Provide more visibility into how many urls are queued, at which rate are they getting processed etc
+- [ ] Support JS execution using ... (v8 or webkit, not many options)
 
 ## Feedback
 If you find any bugs or have any feature suggestions please file [an issue](https://github.com/nkitsaini/waper/issues) on github.
