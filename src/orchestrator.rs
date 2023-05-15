@@ -9,17 +9,40 @@ use patricia_tree::PatriciaSet;
 use regex::RegexSet;
 use url::Url;
 
-use sqlx::sqlite;
 use tokio::sync::mpsc;
 
+use crate::config::ConfigReciever;
+use crate::db::Database;
 use crate::prelude::*;
 use crate::scraper;
 
+/// Used to run and controll the craping
+/// let runner = Orchestrator::new(config)
+/// runner.init(); // read state from db if necessary
+///
+///
+/// runner.run().await ; // wait till run finishes
+///
+/// You can pause/resume/cancel operation using normal future primitives.
+/// For example using: https://tokio.rs/tokio/tutorial/select#resuming-an-async-operation
+/// let operation = runner.run();
+/// tokio::pin!(operation);
+/// loop {
+///     tokio::select! {
+///         _ = &mut operation => {};   
+///         _ = tokio::time::sleep(dur) => {};   
+///     }
+///     // Do something every `dur` and in the next loop everything will be resumed from the left of state.
+/// }
+/// tokio::race!(a, timeout(10))
+/// As soon as `a` is dropped aka cancelled, the processing will stop. Any outgoing requests will be cancelled.
+///
+/// Use: https://tokio.rs/tokio/tutorial/select#resuming-an-async-operation
+/// let a =  runner.run(); // start where left of
+///
 pub struct Orchestrator {
     seed_urls: Vec<Url>,
-    blacklist_re: Arc<RegexSet>,
-    whitelist_re: Arc<RegexSet>,
-    limits: RateLimit,
+    config: Arc<Mutex<RuntimeConfig>>,
 
     queue_rx: mpsc::UnboundedReceiver<Url>,
     queue_tx: mpsc::UnboundedSender<Url>,
@@ -33,54 +56,67 @@ pub struct Orchestrator {
     // tasks: futures::stream::FuturesUnordered<BoxFuture<'static, ()>>,
     tasks: futures::stream::FuturesUnordered<BoxFuture<'static, anyhow::Result<()>>>,
 
-    outfile: sqlx::sqlite::SqlitePool,
+    db: Database,
 }
 
+#[derive(Debug, Clone)]
 pub struct RateLimit {
     max_parallel_requests: u64,
 }
-struct ScraperContext {
-    blacklist_re: Arc<RegexSet>,
-    whitelist_re: Arc<RegexSet>,
-    noticed_uris: Arc<Mutex<PatriciaSet>>,
-    request_client: reqwest::Client,
-    queue_tx: mpsc::UnboundedSender<Url>,
-    outfile: sqlx::sqlite::SqlitePool,
+
+#[derive(Debug, Clone)]
+pub struct Filter {
+    pub blacklist_re: RegexSet,
+    pub whitelist_re: RegexSet,
 }
-// unsafe impl Send for ScraperContext {}
+
+impl Filter {
+    pub fn is_match(&self, value: &str) -> bool {
+        debug!(value, "Filter match");
+        if self.blacklist_re.is_match(value) || !self.whitelist_re.is_match(value) {
+            debug!(
+                value,
+                "Did not match: {:?}, {:?}", self.blacklist_re, self.whitelist_re
+            );
+            false
+        } else {
+            debug!(value, "Passed filter");
+            true
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    pub rate_limit: RateLimit,
+    pub filter: Filter,
+}
+impl RuntimeConfig {
+    pub fn new(limit: RateLimit, whitelist_re: RegexSet, blacklist_re: RegexSet) -> Self {
+        Self {
+            rate_limit: limit,
+            filter: Filter {
+                whitelist_re,
+                blacklist_re,
+            },
+        }
+    }
+}
 
 impl Orchestrator {
-    pub fn new(
-        seed_urls: Vec<Url>,
-        blacklist_re: RegexSet,
-        whitelist_re: RegexSet,
-        limits: RateLimit,
-        outfile: sqlx::sqlite::SqlitePool,
-    ) -> Self {
+    pub fn new(seed_urls: Vec<Url>, config: Arc<Mutex<RuntimeConfig>>, db: Database) -> Self {
         let (queue_tx, queue_rx) = mpsc::unbounded_channel();
         Self {
             seed_urls,
-            blacklist_re: Arc::new(blacklist_re),
-            whitelist_re: Arc::new(whitelist_re),
-            limits,
+            config,
             queue_rx,
             queue_tx,
-            request_client: reqwest::ClientBuilder::new().timeout(Duration::from_secs(10)).build().unwrap(),
+            request_client: reqwest::ClientBuilder::new()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .unwrap(),
             noticed_uris: Arc::new(Mutex::new(PatriciaSet::new())),
             tasks: futures::stream::FuturesUnordered::new(),
-            outfile,
-        }
-    }
-
-    fn create_context(&self) -> ScraperContext {
-        let queue_tx = self.queue_tx.clone();
-        ScraperContext {
-            blacklist_re: self.blacklist_re.clone(),
-            whitelist_re: self.whitelist_re.clone(),
-            noticed_uris: self.noticed_uris.clone(),
-            request_client: self.request_client.clone(),
-            outfile: self.outfile.clone(),
-            queue_tx,
+            db,
         }
     }
 
@@ -88,10 +124,11 @@ impl Orchestrator {
         debug!("Starting orchestrator");
         let mut seed_links = self.seed_urls.clone();
         if include_unprocessed_from_db {
-            seed_links.append(&mut Self::get_unprocessed_links(&self.outfile).await?);
+            seed_links.append(&mut self.db.get_unprocessed_links().await?);
         }
 
-		let split_point = (self.limits.max_parallel_requests as usize).min(seed_links.len());
+        let split_point =
+            (self.config.lock().rate_limit.max_parallel_requests as usize).min(seed_links.len());
         // Schedule seed links
         for link in &seed_links[..split_point] {
             info!("Scheduling {}", link);
@@ -99,20 +136,20 @@ impl Orchestrator {
                 .push(Self::scrape_link(self.create_context(), link.clone()).boxed());
         }
         for link in &seed_links[split_point..] {
-			self.queue_tx.send(link.clone())?;
-		}
+            self.queue_tx.send(link.clone())?;
+        }
         self.noticed_uris
             .lock()
             .extend(seed_links.iter().map(|x| x.to_string()));
 
-        Self::add_to_links(self.seed_urls.clone(), &self.outfile).await?;
+        self.db.add_to_links(self.seed_urls.clone()).await?;
 
         while let Some(task) = self.tasks.next().await {
             if let Err(e) = task {
                 error!("Error: {:?}", e);
                 // continue even if error as task completion might have freed the `RateLimit` pool
             }
-            while self.tasks.len() < self.limits.max_parallel_requests as usize {
+            while self.tasks.len() < self.config.lock().rate_limit.max_parallel_requests as usize {
                 // error drop: The error can never be `TryRecvError::Disconnected`
                 // as we always have a reference to queue_tx in `Self`
                 if let Ok(x) = self.queue_rx.try_recv() {
@@ -134,11 +171,17 @@ impl Orchestrator {
 
         let scrape_result = match scrape_result {
             Ok(r) => {
-                Self::add_to_results(url.clone(), r.html.clone(), &context.outfile).await?;
+                context
+                    .db
+                    .add_to_results(url.clone(), r.html.clone())
+                    .await?;
                 r
             }
             Err(e) => {
-                Self::add_to_errors(url.clone(), format!("{e:?}"), &context.outfile).await?;
+                context
+                    .db
+                    .add_to_errors(url.clone(), format!("{e:?}"))
+                    .await?;
                 Err(e).context(format!("Failed to fetch webpage for uri: {url}"))?;
                 unreachable!();
             }
@@ -152,12 +195,8 @@ impl Orchestrator {
             for link in scrape_result.links {
                 // TODO: too many to_string operations
                 // benchmark and move to passing strings around instead if required.
-                if context.blacklist_re.is_match(&link.to_string()) {
-                    debug!("Does not match blacklist: {}", link);
-                    continue;
-                }
-                if !context.whitelist_re.is_match(&link.to_string()) {
-                    debug!("Does not match whitelist: {}", link);
+                if !context.config.lock().filter.is_match(link.as_str()) {
+                    debug!("Does not match filter: {}", link);
                     continue;
                 }
 
@@ -176,79 +215,19 @@ impl Orchestrator {
                     .expect("reciever should never be dropped as long as scrapes are running");
             }
         }
-        Self::add_to_links(links_to_add, &context.outfile).await?;
+        context.db.add_to_links(links_to_add).await?;
         Ok(())
     }
 
-    // ---------------------- DB operations
-    async fn add_to_links(urls: Vec<Url>, db_conn: &sqlite::SqlitePool) -> anyhow::Result<()> {
-        let mut tx = db_conn.begin().await?;
-        for url in urls {
-            // TODO: please make this performant (benchmark!!)
-            // see: https://github.com/launchbadge/sqlx/issues/294
-            let url_string = url.to_string();
-            let query = sqlx::query!("INSERT INTO links (url) VALUES (?)", url_string);
-            query.execute(&mut tx).await?;
+    fn create_context(&self) -> ScraperContext {
+        let queue_tx = self.queue_tx.clone();
+        ScraperContext {
+            config: self.config.clone(),
+            noticed_uris: self.noticed_uris.clone(),
+            request_client: self.request_client.clone(),
+            db: self.db.clone(),
+            queue_tx,
         }
-        tx.commit().await?;
-        Ok(())
-    }
-
-    async fn add_to_results(
-        url: Url,
-        html: String,
-        db_conn: &sqlite::SqlitePool,
-    ) -> anyhow::Result<()> {
-        let url_string = url.to_string();
-        sqlx::query!(
-            "INSERT INTO results (url, content) VALUES (?, ?)",
-            url_string,
-            html
-        )
-        .execute(db_conn)
-        .await
-        .context(format!("Failed to insert in sqlite db for uri: {url}"))?;
-        Ok(())
-    }
-
-    async fn add_to_errors(
-        url: Url,
-        msg: String,
-        db_conn: &sqlite::SqlitePool,
-    ) -> anyhow::Result<()> {
-        let url_string = url.to_string();
-        sqlx::query!(
-            "INSERT INTO errors (url, msg) VALUES (?, ?)",
-            url_string,
-            msg
-        )
-        .execute(db_conn)
-        .await
-        .context(format!(
-            "Failed to insert error in sqlite db for uri: {url}"
-        ))?;
-        Ok(())
-    }
-
-    async fn get_unprocessed_links(db_conn: &sqlite::SqlitePool) -> anyhow::Result<Vec<Url>> {
-        let results = sqlx::query!(
-            "
-			SELECT url FROM links
-			WHERE
-				url NOT IN (SELECT url FROM results) AND
-				url NOT IN (SELECT url FROM errors)
-			ORDER BY time",
-        )
-        .fetch_all(db_conn)
-        .await
-        .context("Failed to fetch links from sqlite db".to_string())?;
-
-        let mut rv = vec![];
-        for result in results {
-            let _uri = result.url.parse::<Url>().context("Invalid Url in DB")?;
-			rv.push(_uri);
-        }
-        Ok(rv)
     }
 }
 
@@ -258,4 +237,12 @@ impl From<u64> for RateLimit {
             max_parallel_requests: value,
         }
     }
+}
+
+struct ScraperContext {
+    config: Arc<Mutex<RuntimeConfig>>,
+    noticed_uris: Arc<Mutex<PatriciaSet>>,
+    request_client: reqwest::Client,
+    queue_tx: mpsc::UnboundedSender<Url>,
+    db: Database,
 }

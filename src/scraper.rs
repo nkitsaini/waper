@@ -6,11 +6,9 @@ pub struct ScrapingResult {
     pub html: String,
 }
 
-
 pub async fn scrap_links(url: &Url, client: reqwest::Client) -> anyhow::Result<ScrapingResult> {
     let reqwest_url: reqwest::Url = reqwest::Url::parse(&url.to_string())?;
     let text = client.get(reqwest_url).send().await?.text().await?;
-    // TODO: implement
     let links = select::document::Document::from(text.as_str())
         .find(Name("a"))
         .filter_map(|n| {

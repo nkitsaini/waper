@@ -1,0 +1,2 @@
+- [ ] Add CLI capabilities to take input while scanning in running and show progress summary (similar to pacman/aria2c mixed with input)
+- [ ] Add ability to scrape JS files
