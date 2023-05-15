@@ -1,5 +1,4 @@
 mod cli;
-mod config;
 mod db;
 mod log;
 mod orchestrator;
@@ -8,7 +7,6 @@ mod scraper;
 
 use clap::{CommandFactory, Parser};
 use cli::{Args, Command};
-use config::create_config;
 use db::Database;
 use parking_lot::Mutex;
 use regex::RegexSet;

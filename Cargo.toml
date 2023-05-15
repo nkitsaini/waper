@@ -13,8 +13,7 @@ default-run = "waper"
 anyhow = "1.0.71"
 clap = { version = "4.2.7", features = ["derive"] }
 futures = "0.3.28"
-parking_lot = { version = "0.12.1", features = ["send_guard"] }
-async-condvar-fair = { version = "1.0.0", features = ["parking_lot_0_12"] }
+parking_lot = { version = "0.12.1" }
 patricia_tree = "0.5.7"
 radix_trie = "0.2.1"
 regex = "1.8.1"
@@ -27,7 +26,6 @@ trie-rs = "0.1.1"
 sqlx = { version = "0.6.2", features = [ "runtime-tokio-native-tls", "sqlite" ] }
 clap_complete = "4.2.1"
 url = "2.3.1"
-indicatif = "0.17.3"
 shlex = "1.1.0"
 
 

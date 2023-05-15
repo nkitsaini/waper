@@ -11,7 +11,6 @@ use url::Url;
 
 use tokio::sync::mpsc;
 
-use crate::config::ConfigReciever;
 use crate::db::Database;
 use crate::prelude::*;
 use crate::scraper;
