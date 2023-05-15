@@ -11,11 +11,7 @@ use db::Database;
 use parking_lot::Mutex;
 use regex::RegexSet;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::{
-    io::{self, Write},
-    sync::Arc,
-    time::Duration,
-};
+use std::{io, sync::Arc};
 use tracing::{debug, Level};
 
 use crate::orchestrator::RuntimeConfig;
@@ -80,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
         } else {
             tokio::select! {
                 x = &mut operation => {
-                    println!("Done: {:?}", x);
+                    println!("Done: {x:?}");
                     x?;
                     break;
                 },

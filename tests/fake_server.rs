@@ -1,6 +1,6 @@
 //! Starts a fake server, serving from an In-Memory directory structure
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use axum::{
     extract::Path,
@@ -82,7 +82,7 @@ async fn run_server() -> anyhow::Result<()> {
         .route("/*page", get(page_return))
         .route("/", get(page_return));
     let addr = SocketAddr::from(([127, 0, 0, 1], 10605));
-    println!("Listening on http://{}", addr);
+    println!("Listening on http://{addr}");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
