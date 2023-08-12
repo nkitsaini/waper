@@ -13,7 +13,15 @@ pub async fn scrap_links(url: &Url, client: reqwest::Client) -> anyhow::Result<S
         .find(Name("a"))
         .filter_map(|n| {
             let value = n.attr("href")?;
-            url.join(value).ok()
+            match url.join(value).ok() {
+                Some(mut x) => {
+                    // We don't care about fragements, multiple fragements are generally present in same page
+                    // so this will make us crawl same page multiple times if left unchecked
+                    x.set_fragment(None);
+                    Some(x)
+                }
+                None => None,
+            }
         })
         .collect::<Vec<_>>();
 

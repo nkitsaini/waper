@@ -69,26 +69,6 @@ async fn main() -> anyhow::Result<()> {
 
     let mut orchestrator = orchestrator::Orchestrator::new(src, config.clone(), db);
     let operation = orchestrator.start(args.include_db_links);
-    tokio::pin!(operation);
-    let mut cli = cli::Repl::new();
-
-    loop {
-        if cli.is_closed() {
-            (&mut operation).await?;
-        } else {
-            tokio::select! {
-                x = &mut operation => {
-                    println!("Done: {x:?}");
-                    x?;
-                    break;
-                },
-                _ = cli.next_input() => {debug!("User input") }
-            }
-
-            cli.run(config.clone()).await?;
-        }
-    }
-
-    println!("To Exit? Why am I not exiting? is tokio keeping me alive. I don't know"); // FIXME
+    operation.await?;
     Ok(())
 }
